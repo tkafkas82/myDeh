@@ -1,0 +1,18 @@
+{
+  "name": "mydei",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fetch and organize DEI (myDEH) properties and bills into a local dashboard, CSV and PDF archive",
+  "type": "commonjs",
+  "bin": { "mydei": "cli.js" },
+  "scripts": {
+    "login": "node cli.js login",
+    "fetch": "node cli.js fetch",
+    "serve": "node cli.js serve",
+    "export": "node cli.js export",
+    "test": "node test/greek.test.js"
+  },
+  "dependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

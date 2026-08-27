@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>myΔΕΗ — Λογαριασμοί</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #fff; --ink: #10151c; --soft: #55606f;
+    --muted: #8a94a3; --rule: #e3e7ec; --accent: #0a68d1; --warn: #c2410c;
+    --bad: #b91c1c; --good: #15803d;
+    --font: "Inter", ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    --r: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1116; --surface: #161b22; --ink: #e8edf4; --soft: #b3bdca;
+      --muted: #7d8794; --rule: #242b34; --accent: #4d9dff; --warn: #fb923c;
+      --bad: #f87171; --good: #4ade80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); line-height: 1.5; }
+  header { padding: 1.5rem clamp(1rem,3vw,2.5rem) 1rem; border-bottom: 1px solid var(--rule); display: flex; flex-wrap: wrap; gap: 1rem; align-items: baseline; justify-content: space-between; }
+  h1 { margin: 0; font-size: 1.2rem; letter-spacing: -0.01em; }
+  h1 span { color: var(--accent); }
+  .meta { font-family: var(--mono); font-size: .78rem; color: var(--muted); }
+  main { padding: clamp(1rem,3vw,2.5rem); max-width: 1400px; margin: 0 auto; }
+
+  .totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: .9rem; margin-bottom: 1.75rem; }
+  .tile { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r); padding: .9rem 1rem; }
+  .tile b { display: block; font-size: 1.5rem; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .tile small { color: var(--muted); font-size: .74rem; text-transform: uppercase; letter-spacing: .07em; font-family: var(--mono); }
+  .tile.owed b { color: var(--bad); }
+
+  .houses { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px,1fr)); gap: 1rem; }
+  .house { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r); overflow: hidden; }
+  .house > h2 { margin: 0; padding: .85rem 1rem; font-size: .98rem; border-bottom: 1px solid var(--rule); display: flex; justify-content: space-between; gap: .75rem; align-items: baseline; }
+  .house > h2 code { font-family: var(--mono); font-size: .76rem; color: var(--muted); font-weight: 400; }
+  .facts { display: grid; grid-template-columns: 1fr 1fr; gap: .1rem 1rem; padding: .85rem 1rem; }
+  .facts div { font-size: .82rem; }
+  .facts dt { color: var(--muted); font-size: .72rem; font-family: var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+  .facts dd { margin: 0 0 .5rem; font-variant-numeric: tabular-nums; }
+  .owed-yes { color: var(--bad); font-weight: 600; }
+  .owed-no { color: var(--good); }
+
+  .spark { display: flex; align-items: flex-end; gap: 2px; height: 34px; padding: 0 1rem .6rem; }
+  .spark i { flex: 1; background: var(--accent); opacity: .35; border-radius: 1px; min-height: 2px; }
+  .spark i.last { opacity: 1; }
+
+  table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+  th, td { text-align: left; padding: .45rem 1rem; border-top: 1px solid var(--rule); }
+  th { font-family: var(--mono); font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { font-family: var(--mono); font-size: .66rem; padding: .1rem .4rem; border-radius: 99px; border: 1px solid currentColor; }
+  .pill.paid { color: var(--good); }
+  .pill.unpaid { color: var(--bad); }
+  .pill.unknown { color: var(--muted); }
+  details summary { cursor: pointer; padding: .5rem 1rem; font-size: .78rem; color: var(--accent); border-top: 1px solid var(--rule); }
+  a { color: var(--accent); }
+  .empty { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r); padding: 2rem; text-align: center; }
+  .empty code { display: inline-block; background: var(--bg); border: 1px solid var(--rule); padding: .2rem .45rem; border-radius: 5px; font-family: var(--mono); font-size: .8rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>my<span>ΔΕΗ</span> — Λογαριασμοί</h1>
+  <p class="meta" id="meta">φόρτωση…</p>
+</header>
+
+<main>
+  <div id="totals" class="totals" hidden></div>
+  <div id="houses" class="houses"></div>
+</main>
+
+<script>
+const euro = n => (n == null || !isFinite(n)) ? '—'
+  : n.toLocaleString('el-GR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+const num = (n, d = 0) => (n == null || !isFinite(n)) ? '—'
+  : n.toLocaleString('el-GR', { minimumFractionDigits: d, maximumFractionDigits: d });
+const day = iso => iso ? iso.split('-').reverse().join('/') : '—';
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const STATUS = { paid: 'Εξοφλημένος', unpaid: 'Ανεξόφλητος', unknown: '—' };
+
+function sparkline(bills) {
+  const vals = bills.slice(0, 12).reverse().map(b => b.kwh).filter(n => typeof n === 'number');
+  if (vals.length < 2) return '';
+  const max = Math.max(...vals);
+  // Pixel heights, not percentages: a percentage height on a flex item depends
+  // on the container resolving a definite height, which is fragile here.
+  const H = 26;
+  return '<div class="spark" title="Κατανάλωση kWh, παλαιότερο → νεότερο">' +
+    vals.map((v, i) => {
+      const px = Math.max(3, Math.round((v / max) * H));
+      return `<i class="${i === vals.length - 1 ? 'last' : ''}" style="height:${px}px" title="${v} kWh"></i>`;
+    }).join('') +
+    '</div>';
+}
+
+function billRows(bills) {
+  return bills.slice(0, 60).map(b => `
+    <tr>
+      <td>${day(b.issueDate || b.dueDate)}</td>
+      <td>${day(b.dueDate)}</td>
+      <td class="num">${euro(b.amount)}</td>
+      <td class="num">${num(b.kwh)}</td>
+      <td><span class="pill ${b.status}">${STATUS[b.status] || '—'}</span></td>
+      <td>${b.pdfFile ? `<a href="/${esc(b.pdfFile).replace(/\\\\/g, '/')}" target="_blank">PDF</a>` : ''}</td>
+    </tr>`).join('');
+}
+
+function render(data) {
+  const props = data.properties || [];
+  document.getElementById('meta').textContent =
+    props.length ? `${props.length} ακίνητα · ενημέρωση ${new Date(data.generatedAt).toLocaleString('el-GR')}` : '';
+
+  if (!props.length) {
+    document.getElementById('houses').innerHTML = `
+      <div class="empty">
+        <p>Δεν υπάρχουν αποθηκευμένα δεδομένα.</p>
+        <p><code>npm run login</code> και μετά <code>npm run fetch</code></p>
+      </div>`;
+    return;
+  }
+
+  const owed = props.reduce((s, p) => s + (p.stats.outstanding || 0), 0);
+  const total = props.reduce((s, p) => s + (p.stats.totalBilled || 0), 0);
+  const bills = props.reduce((s, p) => s + (p.stats.billCount || 0), 0);
+  const next = props.map(p => p.stats.nextDue).filter(Boolean).sort()[0];
+
+  const totals = document.getElementById('totals');
+  totals.hidden = false;
+  totals.innerHTML = `
+    <div class="tile owed"><small>Συνολική οφειλή</small><b>${euro(owed)}</b></div>
+    <div class="tile"><small>Ακίνητα</small><b>${props.length}</b></div>
+    <div class="tile"><small>Λογαριασμοί</small><b>${bills}</b></div>
+    <div class="tile"><small>Σύνολο χρεώσεων</small><b>${euro(total)}</b></div>
+    <div class="tile"><small>Επόμενη λήξη</small><b>${day(next)}</b></div>`;
+
+  // Most owed first, so what needs attention is at the top.
+  props.sort((a, b) => (b.stats.outstanding || 0) - (a.stats.outstanding || 0));
+
+  document.getElementById('houses').innerHTML = props.map(p => `
+    <section class="house">
+      <h2>
+        <span>${esc(p.name || p.key || 'Ακίνητο')}</span>
+        <code>${esc(p.supply || '')}</code>
+      </h2>
+      <dl class="facts">
+        <div><dt>Οφειλή</dt><dd class="${p.stats.outstanding > 0 ? 'owed-yes' : 'owed-no'}">
+          ${p.stats.outstanding > 0 ? euro(p.stats.outstanding) : 'Εξοφλημένο'}</dd></div>
+        <div><dt>Επόμενη λήξη</dt><dd>${day(p.stats.nextDue)}</dd></div>
+        <div><dt>Λογαριασμοί</dt><dd>${p.stats.billCount}</dd></div>
+        <div><dt>Μέσος λογ.</dt><dd>${euro(p.stats.avgBill)}</dd></div>
+        <div><dt>Τελευταία kWh</dt><dd>${num(p.stats.lastKwh)}</dd></div>
+        <div><dt>Μέση kWh</dt><dd>${num(p.stats.avgKwh)}</dd></div>
+      </dl>
+      ${sparkline(p.bills || [])}
+      ${(p.bills || []).length ? `
+      <details>
+        <summary>Αναλυτικά (${p.bills.length})</summary>
+        <table>
+          <thead><tr><th>Έκδοση</th><th>Λήξη</th><th class="num">Ποσό</th><th class="num">kWh</th><th>Κατάσταση</th><th></th></tr></thead>
+          <tbody>${billRows(p.bills)}</tbody>
+        </table>
+      </details>` : ''}
+    </section>`).join('');
+}
+
+fetch('/api/data')
+  .then(r => r.json())
+  .then(render)
+  .catch(e => {
+    document.getElementById('meta').textContent = 'σφάλμα';
+    document.getElementById('houses').innerHTML = `<div class="empty"><p>${esc(e.message)}</p></div>`;
+  });
+</script>
+</body>
+</html>

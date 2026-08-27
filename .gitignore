@@ -1,0 +1,14 @@
+# Everything under data/ is your real account data: the browser profile with
+# your live session, scraped bills, page snapshots and downloaded PDFs.
+# None of it belongs in a repository.
+data/
+
+node_modules/
+
+# OS / editor
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+.idea/
+.vscode/
