@@ -38,6 +38,7 @@
   .house { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r); overflow: hidden; }
   .house > h2 { margin: 0; padding: .85rem 1rem; font-size: .98rem; border-bottom: 1px solid var(--rule); display: flex; justify-content: space-between; gap: .75rem; align-items: baseline; }
   .house > h2 code { font-family: var(--mono); font-size: .76rem; color: var(--muted); font-weight: 400; }
+  .product { margin: 0; padding: .5rem 1rem 0; font-size: .74rem; color: var(--muted); font-family: var(--mono); }
   .facts { display: grid; grid-template-columns: 1fr 1fr; gap: .1rem 1rem; padding: .85rem 1rem; }
   .facts div { font-size: .82rem; }
   .facts dt { color: var(--muted); font-size: .72rem; font-family: var(--mono); text-transform: uppercase; letter-spacing: .06em; }
@@ -177,8 +178,9 @@ function render(data) {
     <section class="house">
       <h2>
         <span>${esc(p.name || p.key || 'Ακίνητο')}</span>
-        <code>${esc(p.supply || '')}</code>
+        <code>${esc(p.supply || p.contractAccount || p.key || '')}</code>
       </h2>
+      ${p.product ? `<p class="product">${esc(p.product)}</p>` : ''}
       <dl class="facts">
         <div><dt>Οφειλή</dt><dd class="${p.stats.outstanding > 0 ? 'owed-yes' : 'owed-no'}">
           ${p.stats.outstanding > 0 ? euro(p.stats.outstanding) : 'Εξοφλημένο'}</dd></div>

@@ -82,7 +82,7 @@ one thing that cannot be automated — deliberately.
 
 ## What it collects
 
-Per property: name/address, supply number (παροχή), contract account.
+Per property: address, tariff/product, contract account.
 
 Per bill: issue date, due date, period, amount, consumption in kWh, paid status,
 bill number, and the PDF.
@@ -169,11 +169,35 @@ in an *Ενεργειακή κατανάλωση* widget on the account page —
 than a table — which would need a separate pass to reach. The fields are left
 null rather than filled with anything invented.
 
-## Naming your properties
+## Addresses and tariffs
 
-The account pages expose no address in any form this could read reliably, so
-properties would show as bare 12-digit numbers. Name them yourself instead —
-menu option 8, or:
+Each property is labelled with its real address, taken from the properties
+carousel that every account page carries:
+
+```
+div.b-supplies-navigation__item  ->  300015431312ΠΑΝΑΓΟΥΛΗ Α. 20, 15773, ΖΩΓΡΑΦΟΥ
+```
+
+One page yields the addresses of all of them, so it costs no extra requests.
+The tariff (`ΟΙΚΙΑΚΟ Γ1/Γ1Ν Ειδικό τιμολόγιο`, `myHome Enter…`) comes from
+`/el/accounts/`, one further page.
+
+Those cards render as a single run of text with the labels embedded, so values
+are recovered by splitting on the known labels (`Διεύθυνση`, `Προϊόν`,
+`Υπηρεσία`, …). Two approaches were tried and rejected: pairing each label with
+the next leaf element truncated the tariff to its last fragment, and cutting at
+a lowercase→uppercase boundary as a generic guard against unlisted labels
+truncated `myHome Enter…` to `my`. If a new label appears, add it to `LABELS` —
+a stray label inside a value is visible and harmless, a silently truncated
+tariff is not.
+
+**The account number is always displayed alongside**, because two supplies can
+share one address (a flat and a shared meter, for instance) and the address
+alone would not tell them apart.
+
+### Your own names
+
+To override the address with something shorter, use menu option 8, or:
 
 ```bash
 node cli.js name                              # list them
@@ -182,7 +206,7 @@ node cli.js name 300015431312                 # clear it
 ```
 
 Stored in `data/names.json`, which the scraper never writes, so names survive
-every re-fetch.
+every re-fetch and always win over the scraped address.
 
 ---
 

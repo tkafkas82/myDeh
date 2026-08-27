@@ -76,6 +76,7 @@ function merge(scraped, now = new Date().toISOString()) {
     // Refresh descriptive fields, keeping any earlier value if now missing.
     existing.name = property.name || existing.name;
     existing.address = property.address || existing.address;
+    existing.product = property.product || existing.product;
     existing.supply = property.supply || existing.supply;
     existing.contractAccount = property.contractAccount || existing.contractAccount;
     existing.lastSeen = now;
@@ -148,6 +149,7 @@ function all() {
     supply: p.supply,
     contractAccount: p.contractAccount,
     address: p.address,
+    product: p.product,
     firstSeen: p.firstSeen,
     lastSeen: p.lastSeen,
     bills: Object.values(p.bills || {}).sort((a, b) =>

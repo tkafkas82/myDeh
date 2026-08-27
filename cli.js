@@ -173,8 +173,16 @@ async function main() {
       const rows = summarise(data.properties);
       console.log('');
       for (const p of rows) {
-        console.log(`  ${(p.name || p.key).slice(0, 46).padEnd(48)} ${String(p.stats.billCount).padStart(3)} bills  ` +
-          `owed ${formatAmount(p.stats.outstanding).padStart(10)} €  next ${p.stats.nextDue || '—'}`);
+        // The account number is always shown: two supplies can sit at the same
+        // address (a flat and its shared meter, say), so the address alone does
+        // not tell them apart.
+        const label = (p.name || p.key).slice(0, 40).padEnd(42);
+        const account = String(p.contractAccount || p.key).padEnd(14);
+
+        console.log(
+          `  ${label} ${account} ${String(p.stats.billCount).padStart(2)} rows  ` +
+          `owed ${formatAmount(p.stats.outstanding).padStart(9)} €  next ${p.stats.nextDue || '—'}`
+        );
       }
       const last = data.runs[data.runs.length - 1];
       console.log(`\n  last run: ${last ? last.at : 'never'}\n`);

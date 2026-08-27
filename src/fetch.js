@@ -76,35 +76,96 @@ async function findAccountPages(page) {
 }
 
 /**
- * Best-effort human label for a property, read off its own page.
+ * Addresses for every property, read from the properties carousel.
  *
- * The account pages carry no obvious address element, so this looks for a
- * labelled value and falls back to the contract account number rather than
- * inventing something.
+ * Each account page carries a switcher listing all supplies, where an item's
+ * text is the contract account immediately followed by its address:
+ *
+ *   300015431312ΠΑΝΑΓΟΥΛΗ Α. 20, 15773, ΖΩΓΡΑΦΟΥ
+ *
+ * So one page yields the addresses of all of them, with no extra requests.
+ *
+ * @returns {Promise<Record<string, string>>} contract account -> address
  */
-async function readPropertyLabel(page) {
+async function readSupplyDirectory(page) {
+  return page
+    .evaluate(() => {
+      const clean = s => (s || '').trim().replace(/\s+/g, ' ');
+      const out = {};
+
+      for (const el of document.querySelectorAll('.b-supplies-navigation__item, [class*="supplies-navigation"] .item')) {
+        const text = clean(el.textContent);
+        const m = text.match(/^(\d{10,14})\s*(.+)$/);
+        if (!m) continue;
+
+        const address = clean(m[2]);
+        if (address && address.length < 160) out[m[1]] = address;
+      }
+
+      return out;
+    })
+    .catch(() => ({}));
+}
+
+/**
+ * Tariff and billing details per property, from the accounts list page.
+ *
+ * Its cards are label/value pairs — "Λογ. Συμβολ.", "Διεύθυνση", "Προϊόν" — so
+ * they are read generically by pairing each recognised label with the text that
+ * follows it, rather than by depending on class names.
+ *
+ * @returns {Promise<Record<string, {address?: string, product?: string}>>}
+ */
+async function readAccountDetails(page) {
   return page
     .evaluate(() => {
       const clean = s => (s || '').trim().replace(/\s+/g, ' ');
       const fold = s => clean(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+      const out = {};
 
-      for (const el of document.querySelectorAll('dt, th, span, strong, label, p')) {
-        const label = fold(el.textContent);
-        if (!/διευθυνσ|ακινητ|παροχ/.test(label) || label.length > 40) continue;
+      // The card renders as one run of text with the labels embedded:
+      //
+      //   Λογ. Συμβολ.300013819346ΔιεύθυνσηΧΩΡΑ, 84005, ΣΕΡΙΦΟΣΠροϊόν
+      //   ΟΙΚΙΑΚΟ Γ1/Γ1Ν Ειδικό τιμολόγιοΕίδος. Λογ.Ηλεκτρονικός…
+      //
+      // Splitting on the labels keeps each value whole. Pairing a label with
+      // the next leaf element instead truncated the product to its last
+      // fragment ("Ειδικό τιμολόγιο", losing "ΟΙΚΙΑΚΟ Γ1/Γ1Ν").
+      const LABELS = [
+        'Λογ. Συμβολ.', 'Διεύθυνση', 'Προϊόν', 'Είδος. Λογ.',
+        'Ειδοποίηση', 'Υπηρεσία', 'Περισσότερα',
+      ];
+      const splitter = new RegExp('(' + LABELS.map(l => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')');
 
-        // The value is usually the next element or the parent's other child.
-        const candidates = [el.nextElementSibling, el.parentElement && el.parentElement.lastElementChild];
-        for (const c of candidates) {
-          if (!c || c === el) continue;
-          const value = clean(c.textContent);
-          if (value && value.length < 120 && value !== clean(el.textContent)) {
-            return { label: clean(el.textContent), value };
-          }
+      // An unlisted label glues itself to the previous value, since the card is
+      // one text run. Cutting at a lowercase-then-uppercase boundary was tried
+      // as a generic guard and was worse than the problem: it truncated
+      // "myHome Enter 01.26 Σταθερό προϊόν" to "my", because product names are
+      // legitimately camelCase. Extending LABELS is the fix — a stray label in
+      // a value is visible and harmless, a silently truncated tariff is not.
+
+      for (const card of document.querySelectorAll('[class*="card-tbl"]')) {
+        const text = clean(card.textContent);
+        const id = (text.match(/\b(30\d{10})\b/) || [])[1];
+        if (!id) continue;
+
+        const parts = text.split(splitter).map(clean).filter(Boolean);
+        const entry = out[id] || (out[id] = {});
+
+        for (let i = 0; i < parts.length - 1; i++) {
+          if (!LABELS.includes(parts[i])) continue;
+          const value = parts[i + 1];
+          if (!value || LABELS.includes(value) || value.length > 140) continue;
+
+          const label = fold(parts[i]);
+          if (label.startsWith('διευθυνση') && !entry.address) entry.address = value;
+          if (label.startsWith('προιον') && !entry.product) entry.product = value;
         }
       }
-      return null;
+
+      return out;
     })
-    .catch(() => null);
+    .catch(() => ({}));
 }
 
 /**
@@ -288,6 +349,19 @@ async function run(opts = {}) {
   if (perProperty) {
     result = [];
 
+    // Tariff/product details, from the accounts list page. One request, and a
+    // failure here must not cost us the ledgers.
+    let details = {};
+    try {
+      await page.goto(`${BASE}/el/accounts/`, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(900);
+      details = await readAccountDetails(page);
+    } catch (e) {
+      /* addresses still come from the carousel below */
+    }
+
+    let directory = {};
+
     for (const property of properties) {
       try {
         await page.goto(property.url, { waitUntil: 'domcontentloaded' });
@@ -301,8 +375,22 @@ async function run(opts = {}) {
       const tables = await tablesOn(page).catch(() => []);
       const bills = billsFromPage(tables);
 
-      const label = await readPropertyLabel(page);
-      if (label && label.value) property.name = `${label.value} · ${property.contractAccount}`;
+      // The carousel lists every property, so read it once and reuse.
+      if (!Object.keys(directory).length) {
+        directory = await readSupplyDirectory(page);
+        if (Object.keys(directory).length) {
+          console.log(`  addresses found for ${Object.keys(directory).length} property/properties`);
+        }
+      }
+
+      const address = directory[property.contractAccount] || (details[property.contractAccount] || {}).address || null;
+      const product = (details[property.contractAccount] || {}).product || null;
+
+      if (address) {
+        property.address = address;
+        property.name = address;
+      }
+      if (product) property.product = product;
 
       const kinds = bills.reduce((acc, b) => {
         acc[b.kind] = (acc[b.kind] || 0) + 1;
