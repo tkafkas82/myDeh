@@ -17,37 +17,40 @@ const { open, firstPage } = require('./browser');
 const BASE = 'https://mydei.dei.gr';
 const LOGIN_URL = `${BASE}/el/login`;
 
-// Text that only appears once you are through the login wall. Several
-// candidates, since the portal's wording may change and any one of them is
-// enough to be confident.
-const SIGNED_IN_HINTS = [
-  'Αποσύνδεση',
-  'Αποσυνδεση',
-  'Logout',
-  'Οι παροχές μου',
-  'Οι λογαριασμοί μου',
-  'Λογαριασμοί',
-  'Παροχές',
-];
-
 /**
  * Is this page past the login screen?
+ *
+ * Deliberately conservative: anything unrecognised counts as *not* signed in.
+ * A false negative just asks you to log in again; a false positive makes the
+ * tool pretend to work and report zero bills.
+ *
  * @param {import('playwright-core').Page} page
  */
 async function isSignedIn(page) {
-  const url = page.url();
+  // Two things make the naive checks wrong here, both learned the hard way:
+  //
+  //  1. The login form is rendered by JavaScript, so at domcontentloaded the
+  //     page has no inputs at all and "no password field" looks like success.
+  //     Hence waiting for one of the two signals to actually appear.
+  //  2. The logout link is in the markup even when anonymous — the template
+  //     ships both states and hides one. So visibility decides, not presence.
+  await page.waitForLoadState('load').catch(() => {});
 
-  // Still sitting on the login form.
-  if (/\/login(\/|$|\?)/i.test(url)) {
-    // ...unless the form is gone, which happens on some redirect flows.
-    const hasPassword = await page.locator('input[type="password"]').count().catch(() => 0);
-    if (hasPassword) return false;
-  }
+  const password = page.locator('input[type="password"]').first();
+  const logout = page.locator('a[href*="Logout" i], a[href*="logout" i]').first();
 
-  const body = await page.textContent('body').catch(() => '');
-  if (!body) return false;
+  // Whichever becomes visible first settles it.
+  await Promise.any([
+    password.waitFor({ state: 'visible', timeout: 15000 }),
+    logout.waitFor({ state: 'visible', timeout: 15000 }),
+  ]).catch(() => {});
 
-  return SIGNED_IN_HINTS.some(h => body.includes(h));
+  if (await password.isVisible().catch(() => false)) return false;
+  if (await logout.isVisible().catch(() => false)) return true;
+
+  // Neither appeared: unknown, so treat as not signed in. A false negative
+  // asks for a login; a false positive makes the tool report zero bills.
+  return false;
 }
 
 /** Wait for either auto-detection or the user pressing Enter. */
@@ -114,16 +117,59 @@ async function login(opts = {}) {
   console.log('');
   if (signedIn) {
     console.log(`Signed in (${outcome}). Session saved to data/profile.`);
-    console.log('Next:  npm run fetch\n');
+    console.log('Fetching continues automatically.\n');
   } else {
     console.log('Could not confirm a signed-in session.');
     console.log(`Current URL: ${page.url()}`);
-    console.log('If you are actually signed in, the detection hints may need');
-    console.log('updating — run "node cli.js discover" and share what it finds.\n');
+    console.log('If you really are signed in, the detection needs adjusting:');
+    console.log('choose "Discover" in mydei.bat and share data/discovery.json.\n');
   }
 
   await context.close();
   return signedIn;
 }
 
-module.exports = { login, isSignedIn, BASE, LOGIN_URL, SIGNED_IN_HINTS };
+/**
+ * Is the saved session still good? Checked quietly, without a visible window.
+ */
+async function hasValidSession() {
+  let context;
+  try {
+    ({ context } = await open({ headless: true }));
+    const page = await firstPage(context);
+    await page.goto(`${BASE}/el/`, { waitUntil: 'domcontentloaded', timeout: 25000 });
+    return await isSignedIn(page);
+  } catch (e) {
+    return false;
+  } finally {
+    if (context) await context.close().catch(() => {});
+  }
+}
+
+/**
+ * Make sure we are signed in, prompting only when we actually have to.
+ *
+ * This is what lets the app run itself: callers never need to know whether a
+ * login is due.
+ */
+async function ensureSignedIn() {
+  process.stdout.write('  checking saved session... ');
+  const valid = await hasValidSession();
+
+  if (valid) {
+    console.log('still valid');
+    return true;
+  }
+
+  console.log('expired or missing');
+  return login();
+}
+
+module.exports = {
+  login,
+  ensureSignedIn,
+  hasValidSession,
+  isSignedIn,
+  BASE,
+  LOGIN_URL,
+};

@@ -10,6 +10,7 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 
 const store = require('./store');
 const { summarise } = require('./parse');
@@ -41,6 +42,17 @@ function serve(opts = {}) {
       };
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(payload));
+      return;
+    }
+
+    // Let the dashboard drive the app, so nobody has to go and type commands.
+    if (route === '/api/login' || route === '/api/refresh') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end('{"error":"POST only"}');
+        return;
+      }
+      runTask(route === '/api/login' ? 'login' : 'fetch', res);
       return;
     }
 
@@ -99,6 +111,55 @@ function serve(opts = {}) {
       console.log('  Ctrl+C to stop\n');
       resolve(server);
     });
+  });
+}
+
+/**
+ * Run `cli.js <task>` and report the outcome to the dashboard.
+ *
+ * Spawned as a child process rather than called in-process so a scrape that
+ * throws cannot take the dashboard down with it, and so the login can open its
+ * own browser window independently.
+ *
+ * One at a time: two concurrent scrapes would fight over the browser profile.
+ */
+let running = null;
+
+function runTask(task, res) {
+  const respond = payload => {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(payload));
+  };
+
+  if (running) {
+    respond({ ok: false, busy: true, task: running, error: `Εκτελείται ήδη: ${running}` });
+    return;
+  }
+
+  running = task;
+
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'cli.js'), task], {
+    cwd: path.join(__dirname, '..'),
+    windowsHide: false, // the login needs its browser window visible
+  });
+
+  let out = '';
+  const cap = chunk => {
+    out += chunk.toString();
+    if (out.length > 200000) out = out.slice(-200000);
+  };
+
+  child.stdout.on('data', cap);
+  child.stderr.on('data', cap);
+
+  child.on('error', err => {
+    running = null;
+    respond({ ok: false, task, error: err.message });
+  });
+
+  child.on('close', code => {
+    running = null;
+    respond({ ok: code === 0, task, code, output: out.trim().slice(-4000) });
   });
 }
 

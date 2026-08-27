@@ -203,7 +203,9 @@ async function run(opts = {}) {
 
   if (!(await isSignedIn(page).catch(() => false))) {
     await context.close();
-    console.log('\nNot signed in. Run:  npm run login\n');
+    // Reached only if the session lapsed between the check and here; callers
+    // sign in first. Worded for whoever is reading it, terminal or dashboard.
+    console.log('\nThe myDEH session is not active. Use "Σύνδεση" / Sign in.\n');
     return null;
   }
 

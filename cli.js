@@ -2,6 +2,7 @@
 /**
  * myDEH — fetch and organize your DEI properties and bills.
  *
+ *   node cli.js run        do everything: sign in if needed, fetch, open dashboard
  *   node cli.js login      sign in once, in a real browser window
  *   node cli.js fetch      scrape properties + bills, archive PDFs
  *   node cli.js discover   map the portal's structure (for calibration)
@@ -21,8 +22,48 @@ function has(flag) {
   return flags.has('--' + flag);
 }
 
+/** Open a URL in the default browser. */
+function openBrowser(url) {
+  const { spawn } = require('node:child_process');
+  try {
+    if (process.platform === 'win32') {
+      // "start" is a shell builtin, and the empty title argument is required
+      // or a quoted URL is treated as the window title.
+      spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' }).unref();
+    } else if (process.platform === 'darwin') {
+      spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
+    } else {
+      spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
+    }
+  } catch (e) {
+    /* the URL is printed anyway */
+  }
+}
+
 async function main() {
   switch (command) {
+    // The whole flow, so nobody has to know the order of the steps.
+    case 'run': {
+      const { ensureSignedIn } = require('./src/login');
+      const { run } = require('./src/fetch');
+      const { serve } = require('./src/server');
+
+      console.log('');
+      if (!(await ensureSignedIn())) {
+        console.log('\n  Sign-in did not complete, so there is nothing to fetch.\n');
+        process.exitCode = 1;
+        break;
+      }
+
+      await run({ headless: !has('show'), pdfs: !has('no-pdfs') });
+
+      const port = Number(process.env.PORT) || 4800;
+      const server = await serve({ port });
+      openBrowser(`http://localhost:${port}`);
+      if (!server) break; // another instance already has the port
+      break;
+    }
+
     case 'login': {
       const { login } = require('./src/login');
       const ok = await login();
@@ -31,7 +72,18 @@ async function main() {
     }
 
     case 'fetch': {
+      const { ensureSignedIn } = require('./src/login');
       const { run } = require('./src/fetch');
+
+      // Sign in first if the session has lapsed, so "fetch" always just works
+      // instead of failing and telling you to go and run something else.
+      console.log('');
+      if (!(await ensureSignedIn())) {
+        console.log('\n  Sign-in did not complete, so there is nothing to fetch.\n');
+        process.exitCode = 1;
+        break;
+      }
+
       // Headed is useful when something is not being found.
       await run({ headless: !has('show'), pdfs: !has('no-pdfs') });
       break;
@@ -67,7 +119,10 @@ async function main() {
 
     case 'serve': {
       const { serve } = require('./src/server');
-      await serve({ port: Number(process.env.PORT) || 4800 });
+      const port = Number(process.env.PORT) || 4800;
+      const server = await serve({ port });
+      if (!has('no-open')) openBrowser(`http://localhost:${port}`);
+      void server;
       break;
     }
 

@@ -59,19 +59,45 @@
   .pill.unknown { color: var(--muted); }
   details summary { cursor: pointer; padding: .5rem 1rem; font-size: .78rem; color: var(--accent); border-top: 1px solid var(--rule); }
   a { color: var(--accent); }
-  .empty { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r); padding: 2rem; text-align: center; }
-  .empty code { display: inline-block; background: var(--bg); border: 1px solid var(--rule); padding: .2rem .45rem; border-radius: 5px; font-family: var(--mono); font-size: .8rem; }
+  .empty { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r); padding: 2.5rem 2rem; text-align: center; grid-column: 1 / -1; }
+  .empty h2 { margin: 0 0 .5rem; font-size: 1.05rem; }
+  .empty p { color: var(--soft); margin: 0 0 1.5rem; }
+
+  button {
+    font: inherit; font-size: .85rem; font-weight: 550;
+    padding: .55rem 1.1rem; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+    transition: border-color .15s, background .15s;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { filter: brightness(1.1); color: #fff; }
+  button:disabled { opacity: .55; cursor: progress; }
+  .actions { display: flex; gap: .55rem; flex-wrap: wrap; justify-content: center; }
+  header .actions { justify-content: flex-end; }
+
+  #log {
+    margin: 1rem auto 0; max-width: 760px; text-align: left;
+    background: var(--bg); border: 1px solid var(--rule); border-radius: 8px;
+    padding: .75rem .9rem; font-family: var(--mono); font-size: .72rem;
+    white-space: pre-wrap; color: var(--soft); max-height: 260px; overflow: auto;
+  }
+  #log:empty { display: none; }
 </style>
 </head>
 <body>
 <header>
   <h1>my<span>ΔΕΗ</span> — Λογαριασμοί</h1>
-  <p class="meta" id="meta">φόρτωση…</p>
+  <div class="actions">
+    <p class="meta" id="meta">φόρτωση…</p>
+    <button id="refresh" title="Λήψη νέων λογαριασμών από το myΔΕΗ">Ανανέωση</button>
+  </div>
 </header>
 
 <main>
   <div id="totals" class="totals" hidden></div>
   <div id="houses" class="houses"></div>
+  <pre id="log"></pre>
 </main>
 
 <script>
@@ -118,9 +144,15 @@ function render(data) {
   if (!props.length) {
     document.getElementById('houses').innerHTML = `
       <div class="empty">
-        <p>Δεν υπάρχουν αποθηκευμένα δεδομένα.</p>
-        <p><code>npm run login</code> και μετά <code>npm run fetch</code></p>
+        <h2>Δεν υπάρχουν ακόμη δεδομένα</h2>
+        <p>Πατήστε λήψη — αν χρειάζεται σύνδεση, θα ανοίξει παράθυρο του browser.</p>
+        <div class="actions">
+          <button class="primary" id="go">Λήψη λογαριασμών</button>
+          <button id="signin">Σύνδεση στο myΔΕΗ</button>
+        </div>
       </div>`;
+    document.getElementById('go').onclick = () => task('refresh', 'Λήψη…');
+    document.getElementById('signin').onclick = () => task('login', 'Άνοιγμα σύνδεσης…');
     return;
   }
 
@@ -168,13 +200,58 @@ function render(data) {
     </section>`).join('');
 }
 
-fetch('/api/data')
-  .then(r => r.json())
-  .then(render)
-  .catch(e => {
+const logEl = document.getElementById('log');
+
+/**
+ * Trigger a login or fetch on the server and reload when it finishes.
+ * Every button on the page is disabled meanwhile — the server refuses
+ * concurrent runs anyway, since they would fight over the browser profile.
+ */
+async function task(which, busyLabel) {
+  const buttons = [...document.querySelectorAll('button')];
+  buttons.forEach(b => { b.disabled = true; });
+
+  const meta = document.getElementById('meta');
+  const previous = meta.textContent;
+  meta.textContent = busyLabel;
+  logEl.textContent = which === 'login'
+    ? 'Άνοιγμα παραθύρου σύνδεσης. Συνδεθείτε εκεί και μετά επιστρέψτε εδώ.'
+    : 'Σύνδεση στο myΔΕΗ και λήψη λογαριασμών. Μπορεί να πάρει ένα λεπτό…';
+
+  try {
+    const res = await fetch('/api/' + which, { method: 'POST' });
+    const out = await res.json();
+
+    if (out.busy) {
+      logEl.textContent = out.error;
+    } else if (out.ok) {
+      logEl.textContent = (out.output || '').trim();
+      await load();          // pick up whatever was just stored
+    } else {
+      logEl.textContent = (out.output || out.error || 'Απέτυχε.').trim();
+    }
+  } catch (e) {
+    logEl.textContent = 'Σφάλμα: ' + e.message;
+  } finally {
+    buttons.forEach(b => { b.disabled = false; });
+    if (document.getElementById('meta').textContent === busyLabel) {
+      document.getElementById('meta').textContent = previous;
+    }
+  }
+}
+
+async function load() {
+  try {
+    render(await (await fetch('/api/data')).json());
+  } catch (e) {
     document.getElementById('meta').textContent = 'σφάλμα';
-    document.getElementById('houses').innerHTML = `<div class="empty"><p>${esc(e.message)}</p></div>`;
-  });
+    document.getElementById('houses').innerHTML =
+      `<div class="empty"><p>${esc(e.message)}</p></div>`;
+  }
+}
+
+document.getElementById('refresh').onclick = () => task('refresh', 'Λήψη…');
+load();
 </script>
 </body>
 </html>

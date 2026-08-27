@@ -65,28 +65,44 @@ echo   ============================================
 echo             myDEH  -  DEI bills
 echo   ============================================
 echo.
-echo     1.  Dashboard          (open in browser)
-echo     2.  Fetch bills        (update from myDEH)
-echo     3.  Sign in            (needed first, and when the session expires)
-echo     4.  Export CSV         (for Excel)
-echo     5.  Status             (quick summary here)
-echo     6.  Discover           (map the portal, for troubleshooting)
+echo     1.  START            - sign in if needed, fetch, open dashboard
+echo.
+echo     2.  Dashboard only   (skip fetching)
+echo     3.  Fetch only
+echo     4.  Sign in again    (if the session expired)
+echo     5.  Export CSV       (for Excel)
+echo     6.  Status
+echo     7.  Discover         (map the portal, for troubleshooting)
 echo.
 echo     0.  Exit
 echo.
-set "choice="
-set /p "choice=  Choose: "
+REM Enter alone runs the useful thing rather than redrawing the menu.
+set "choice=1"
+set /p "choice=  Choose [1]: "
 
-if "%choice%"=="1" goto :serve
-if "%choice%"=="2" goto :fetch
-if "%choice%"=="3" goto :login
-if "%choice%"=="4" goto :export
-if "%choice%"=="5" goto :status
-if "%choice%"=="6" goto :discover
+if "%choice%"=="1" goto :run
+if "%choice%"=="2" goto :serve
+if "%choice%"=="3" goto :fetch
+if "%choice%"=="4" goto :login
+if "%choice%"=="5" goto :export
+if "%choice%"=="6" goto :status
+if "%choice%"=="7" goto :discover
 if "%choice%"=="0" exit /b 0
 goto :menu
 
 REM --- Actions ------------------------------------------------------------
+
+:run
+echo.
+echo   Signing in if needed, fetching bills, then opening the dashboard.
+echo   If a browser window opens asking you to log in, do that and come back.
+echo.
+node cli.js run
+echo.
+echo   Stopped.
+echo.
+pause
+goto :menu
 
 :login
 echo.
@@ -143,9 +159,7 @@ echo.
 echo   Dashboard:  http://localhost:%PORT%
 echo   Press Ctrl+C in this window to stop it.
 echo.
-REM Open the browser a couple of seconds later, once the server is listening,
-REM while the server itself stays in the foreground so Ctrl+C reaches it.
-start "" /b cmd /c "timeout /t 2 /nobreak >nul & start "" http://localhost:%PORT%"
+REM cli.js opens the browser itself once the port is actually bound.
 node cli.js serve
 echo.
 echo   Server stopped.
