@@ -220,17 +220,36 @@ async function login(opts = {}) {
  * Is the saved session still good? Checked quietly, without a visible window.
  */
 async function hasValidSession() {
-  let context;
-  try {
-    ({ context } = await open({ headless: true }));
-    const page = await firstPage(context);
-    await page.goto(`${BASE}/el/`, { waitUntil: 'domcontentloaded', timeout: 25000 });
-    return await isSignedIn(page);
-  } catch (e) {
-    return false;
-  } finally {
-    if (context) await context.close().catch(() => {});
+  // Distinguish "not signed in" from "could not even look".
+  //
+  // The persistent profile can only be opened by one Chromium at a time, so a
+  // browser that has not fully exited yet makes the launch throw. Swallowing
+  // that as "not signed in" popped a login window at people who were already
+  // signed in, so a locked profile is retried rather than misreported.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let context;
+    try {
+      ({ context } = await open({ headless: true }));
+      const page = await firstPage(context);
+      await page.goto(`${BASE}/el/`, { waitUntil: 'domcontentloaded', timeout: 25000 });
+      return await isSignedIn(page);
+    } catch (e) {
+      const locked = /ProcessSingleton|SingletonLock|already (?:in use|running)|EBUSY|EPERM/i.test(e.message);
+
+      if (locked && attempt === 1) {
+        process.stdout.write('(profile busy, retrying) ');
+        await new Promise(r => setTimeout(r, 3000));
+        continue;
+      }
+
+      if (process.env.MYDEI_DEBUG) console.log('\n  session check failed:', e.message.split('\n')[0]);
+      return false;
+    } finally {
+      if (context) await context.close().catch(() => {});
+    }
   }
+
+  return false;
 }
 
 /**
