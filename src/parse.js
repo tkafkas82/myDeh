@@ -19,17 +19,40 @@ const { fold, containsAny, parseAmount, parseDate, parseKwh } = require('./greek
  * Column vocabulary. First match wins, so more specific terms come first.
  * All compared folded (accent- and case-insensitive).
  */
+/*
+ * The live table (identical on every /el/account/<id>/ page) is:
+ *
+ *   Ημερομηνία | Είδος κίνησης | Περίοδος κατανάλωσης | Εξόφληση έως
+ *              | Τρέχον ποσό | Ληξιπρ. ποσό | Συνολικό ποσό
+ *
+ * It is a transaction ledger, not a bill list — "Είδος κίνησης" distinguishes a
+ * bill from a payment — and it carries three separate amounts rather than one.
+ * There is no consumption column and no status column, so kWh is unavailable
+ * here and paid/unpaid is derived from the overdue amount.
+ *
+ * Order matters: the mapper takes the first field a header matches, so more
+ * specific vocabulary must come before more generic.
+ */
 const COLUMNS = [
-  ['dueDate', ['ημερομηνια ληξης', 'ληξη προθεσμιας', 'ληξης', 'πληρωτεο εως', 'προθεσμια']],
-  ['issueDate', ['ημερομηνια εκδοσης', 'εκδοσης', 'ημερομηνια λογαριασμου', 'ημ/νια']],
-  ['period', ['περιοδος', 'περιοδος καταναλωσης', 'διαστημα', 'μηνας']],
-  ['amount', ['ποσο πληρωμης', 'πληρωτεο ποσο', 'συνολικο ποσο', 'ποσο', 'οφειλη', 'υπολοιπο', 'χρεωση']],
-  ['kwh', ['καταναλωση', 'kwh', 'κατανάλωση kwh', 'ενεργεια']],
-  ['status', ['κατασταση', 'status', 'εξοφληση']],
+  ['dueDate', ['εξοφληση εως', 'ημερομηνια ληξης', 'ληξη προθεσμιας', 'πληρωτεο εως', 'προθεσμια', 'ληξης']],
+  ['issueDate', ['ημερομηνια εκδοσης', 'εκδοσης', 'ημερομηνια λογαριασμου', 'ημερομηνια', 'ημ/νια']],
+  ['type', ['ειδος κινησης', 'κινηση', 'τυπος']],
+  ['period', ['περιοδος καταναλωσης', 'περιοδος', 'διαστημα', 'μηνας']],
+  ['amountCurrent', ['τρεχον ποσο', 'τρεχουσα χρεωση']],
+  ['amountOverdue', ['ληξιπρ', 'ληξιπροθεσμο']],
+  ['amount', ['συνολικο ποσο', 'ποσο πληρωμης', 'πληρωτεο ποσο', 'ποσο', 'οφειλη', 'υπολοιπο', 'χρεωση']],
+  // Bare 'καταναλωση' is safe here despite "Περίοδος κατανάλωσης" containing
+  // it, because `period` above is checked first and claims that header.
+  ['kwh', ['καταναλωση kwh', 'kwh', 'καταναλωση', 'ενεργεια']],
+  ['status', ['κατασταση', 'status']],
   ['billNumber', ['αριθμος λογαριασμου', 'κωδικος λογαριασμου', 'αρ. λογαριασμου', 'αριθμος παραστατικου']],
   ['supply', ['αριθμος παροχης', 'παροχη', 'αρ. παροχης']],
   ['meter', ['μετρητης', 'αριθμος μετρητη']],
 ];
+
+/** "Είδος κίνησης" values that mean a bill was issued, versus a payment made. */
+const BILL_TYPES = ['λογαριασμ', 'εκκαθαρισ', 'τιμολογ', 'χρεωσ'];
+const PAYMENT_TYPES = ['πληρωμ', 'εξοφλησ', 'πιστωσ', 'επιστροφ'];
 
 /** Words that mean "settled" / "unsettled" in a status cell. */
 const PAID_WORDS = ['εξοφλημ', 'πληρωμενο', 'πληρωθηκε', 'paid', 'εξοφληθηκε'];
@@ -71,13 +94,31 @@ function mapHeaders(headers) {
  * @param {number|null} amount
  * @returns {'paid'|'unpaid'|'unknown'}
  */
-function readStatus(raw, amount) {
+function readStatus(raw, amount, overdue) {
   if (raw) {
     if (containsAny(raw, PAID_WORDS)) return 'paid';
     if (containsAny(raw, UNPAID_WORDS)) return 'unpaid';
   }
+
+  // The live table has no status column, but it does have "Ληξιπρ. ποσό":
+  // anything sitting there is overdue by definition.
+  if (typeof overdue === 'number' && overdue > 0) return 'unpaid';
+
   if (amount === 0) return 'paid';
   return 'unknown';
+}
+
+/**
+ * Is this ledger row a bill being issued, or a payment being made?
+ *
+ * @param {string} raw "Είδος κίνησης"
+ * @returns {'bill'|'payment'|'other'}
+ */
+function classifyRow(raw) {
+  if (!raw) return 'other';
+  if (containsAny(raw, PAYMENT_TYPES)) return 'payment';
+  if (containsAny(raw, BILL_TYPES)) return 'bill';
+  return 'other';
 }
 
 /**
@@ -100,12 +141,20 @@ function billsFromTable(table) {
   (table.rows || []).forEach((cells, rowIndex) => {
     const at = field => (map[field] === undefined ? '' : (cells[map[field]] || '').trim());
 
-    const amount = parseAmount(at('amount'));
+    const amountTotal = parseAmount(at('amount'));
+    const amountCurrent = parseAmount(at('amountCurrent'));
+    const amountOverdue = parseAmount(at('amountOverdue'));
     const dueDate = parseDate(at('dueDate'));
     const issueDate = parseDate(at('issueDate'));
     const periodRaw = at('period');
+    const typeRaw = at('type');
 
-    // A row with no money and no dates is a spacer or a total line.
+    // Prefer the total; fall back to whichever amount the table does carry.
+    const amount = amountTotal != null ? amountTotal
+      : amountCurrent != null ? amountCurrent
+      : amountOverdue;
+
+    // A row with no money and no dates is a spacer or a heading.
     if (amount === null && !dueDate && !issueDate) return;
 
     const pdf = (table.links && table.links[rowIndex] || []).find(h => h && /\.pdf|invoice|download|εκτυπωσ/i.test(h)) || null;
@@ -117,8 +166,12 @@ function billsFromTable(table) {
       period: periodRaw || null,
       periodMonth: parseDate(periodRaw) ? parseDate(periodRaw).slice(0, 7) : null,
       amount,
+      amountCurrent,
+      amountOverdue,
+      kind: classifyRow(typeRaw),
+      typeRaw: typeRaw || null,
       kwh: parseKwh(at('kwh')),
-      status: readStatus(at('status'), amount),
+      status: readStatus(at('status'), amount, amountOverdue),
       statusRaw: at('status') || null,
       supply: at('supply') || null,
       meter: at('meter') || null,
@@ -198,6 +251,7 @@ module.exports = {
   billsFromTable,
   billsFromPage,
   readStatus,
+  classifyRow,
   summarise,
   dedupe,
 };

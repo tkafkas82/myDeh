@@ -48,7 +48,67 @@ async function tablesOn(page) {
 }
 
 /**
- * Find the properties (supply points).
+ * Each property has its own page at /el/account/<contract account>/, which is
+ * where its ledger table lives. Enumerating those links is exact, so it is
+ * tried before any of the guesswork below.
+ */
+const ACCOUNT_LINK = /\/(?:el|en)\/account\/(\d{6,})/;
+
+async function findAccountPages(page) {
+  const hrefs = await page
+    .evaluate(() => [...document.querySelectorAll('a[href]')].map(a => a.href))
+    .catch(() => []);
+
+  const ids = [];
+  for (const href of hrefs) {
+    const m = href.match(ACCOUNT_LINK);
+    if (m && !ids.includes(m[1])) ids.push(m[1]);
+  }
+
+  return ids.map(id => ({
+    name: id,
+    contractAccount: id,
+    supply: null,
+    address: null,
+    url: `${BASE}/el/account/${id}/`,
+    source: 'account-page',
+  }));
+}
+
+/**
+ * Best-effort human label for a property, read off its own page.
+ *
+ * The account pages carry no obvious address element, so this looks for a
+ * labelled value and falls back to the contract account number rather than
+ * inventing something.
+ */
+async function readPropertyLabel(page) {
+  return page
+    .evaluate(() => {
+      const clean = s => (s || '').trim().replace(/\s+/g, ' ');
+      const fold = s => clean(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+      for (const el of document.querySelectorAll('dt, th, span, strong, label, p')) {
+        const label = fold(el.textContent);
+        if (!/διευθυνσ|ακινητ|παροχ/.test(label) || label.length > 40) continue;
+
+        // The value is usually the next element or the parent's other child.
+        const candidates = [el.nextElementSibling, el.parentElement && el.parentElement.lastElementChild];
+        for (const c of candidates) {
+          if (!c || c === el) continue;
+          const value = clean(c.textContent);
+          if (value && value.length < 120 && value !== clean(el.textContent)) {
+            return { label: clean(el.textContent), value };
+          }
+        }
+      }
+      return null;
+    })
+    .catch(() => null);
+}
+
+/**
+ * Fallback property discovery, for portals that do not use account pages.
  *
  * Tried in order of reliability:
  *   1. a <select> whose options look like supply numbers
@@ -211,38 +271,60 @@ async function run(opts = {}) {
 
   console.log('\nSigned in. Looking for properties...');
 
-  const properties = await findProperties(page);
+  // Prefer the per-property account pages: each one owns its ledger, so no
+  // guessing is needed about which bill belongs where.
+  let properties = await findAccountPages(page);
+  let perProperty = properties.length > 0;
+
+  if (!perProperty) {
+    properties = await findProperties(page);
+  }
+
   console.log(`  found ${properties.length} property/properties` +
     (properties.length ? ` (via ${properties[0].source})` : ''));
 
-  for (const p of properties) {
-    console.log(`    ${p.supply || '?'}  ${p.name || ''}`.slice(0, 90));
-  }
+  let result;
 
-  console.log('\nLooking for bills...');
+  if (perProperty) {
+    result = [];
 
-  const pages = await collectBills(page);
-  for (const f of pages) console.log(`  ${f.bills.length} bill(s) on ${f.url}`);
+    for (const property of properties) {
+      try {
+        await page.goto(property.url, { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(900); // the ledger is client-rendered
+      } catch (e) {
+        console.log(`  ${property.contractAccount}: could not open (${e.message.split('\n')[0]})`);
+        result.push({ ...property, bills: [] });
+        continue;
+      }
 
-  const allBills = pages.flatMap(f => f.bills);
+      const tables = await tablesOn(page).catch(() => []);
+      const bills = billsFromPage(tables);
 
-  // Attach bills to properties. When a bill names its own supply, trust that;
-  // otherwise, with a single property, everything belongs to it.
-  const result = properties.length
-    ? properties.map(p => ({
-        ...p,
-        bills: allBills.filter(b =>
-          properties.length === 1 ? true : b.supply && p.supply && String(b.supply).includes(String(p.supply))
-        ),
-      }))
-    : [{ name: 'Unknown property', supply: null, bills: allBills, source: 'none' }];
+      const label = await readPropertyLabel(page);
+      if (label && label.value) property.name = `${label.value} · ${property.contractAccount}`;
 
-  // Bills whose supply matched nothing would otherwise be lost.
-  const attached = new Set(result.flatMap(p => p.bills));
-  const orphans = allBills.filter(b => !attached.has(b));
-  if (orphans.length) {
-    console.log(`\n  ${orphans.length} bill(s) could not be matched to a property — kept as "Unassigned".`);
-    result.push({ name: 'Unassigned', supply: null, bills: orphans, source: 'orphan' });
+      const kinds = bills.reduce((acc, b) => {
+        acc[b.kind] = (acc[b.kind] || 0) + 1;
+        return acc;
+      }, {});
+
+      console.log(
+        `    ${property.contractAccount}  ${String(bills.length).padStart(3)} row(s)` +
+        (Object.keys(kinds).length ? `  (${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(', ')})` : '')
+      );
+
+      result.push({ ...property, bills });
+    }
+  } else {
+    console.log('\nLooking for bills...');
+    const pages = await collectBills(page);
+    for (const f of pages) console.log(`  ${f.bills.length} bill(s) on ${f.url}`);
+    const allBills = pages.flatMap(f => f.bills);
+
+    result = properties.length
+      ? properties.map(p => ({ ...p, bills: properties.length === 1 ? allBills : [] }))
+      : [{ name: 'Unknown property', supply: null, bills: allBills, source: 'none' }];
   }
 
   if (opts.pdfs !== false) {
