@@ -58,10 +58,10 @@ async function main() {
 
       await run({ headless: !has('show'), pdfs: !has('no-pdfs') });
 
-      const port = Number(process.env.PORT) || 4800;
-      const server = await serve({ port });
-      openBrowser(`http://localhost:${port}`);
-      if (!server) break; // another instance already has the port
+      const started = await serve({ port: Number(process.env.PORT) || undefined });
+      // Only open what we actually own. Opening a port held by an unrelated
+      // local app lands the user on that app instead of this dashboard.
+      if (started.url) openBrowser(started.url);
       break;
     }
 
@@ -131,10 +131,8 @@ async function main() {
 
     case 'serve': {
       const { serve } = require('./src/server');
-      const port = Number(process.env.PORT) || 4800;
-      const server = await serve({ port });
-      if (!has('no-open')) openBrowser(`http://localhost:${port}`);
-      void server;
+      const started = await serve({ port: Number(process.env.PORT) || undefined });
+      if (started.url && !has('no-open')) openBrowser(started.url);
       break;
     }
 

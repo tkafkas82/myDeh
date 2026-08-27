@@ -18,6 +18,15 @@ const { DATA } = require('./browser');
 
 const DASH = path.join(__dirname, 'dashboard');
 
+// 4800 is a popular default and other local projects on this machine already
+// use it, so pick something quieter. Overridable with PORT, and the server
+// walks upwards anyway if this one is busy.
+const DEFAULT_PORT = 4820;
+
+// Sent in /api/data so an instance on a busy port can recognise itself rather
+// than inferring it from the shape of the payload.
+const APP_ID = 'mydeh';
+
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -25,8 +34,19 @@ const TYPES = {
   '.pdf': 'application/pdf',
 };
 
+/**
+ * Start the dashboard.
+ *
+ * @param {{port?: number, attempts?: number}} opts
+ * @returns {Promise<{server: import('node:http').Server|null, port: number, url: string|null, alreadyRunning?: boolean}>}
+ *
+ * `url` is null only when no port could be secured. Callers must not open a
+ * browser unless `url` is set — opening a port we do not own lands the user on
+ * whatever unrelated app happens to be listening there.
+ */
 function serve(opts = {}) {
-  const port = opts.port || 4800;
+  const port = opts.port || DEFAULT_PORT;
+  const attemptsLeft = opts.attempts === undefined ? 8 : opts.attempts;
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`);
@@ -36,6 +56,7 @@ function serve(opts = {}) {
     if (route === '/api/data') {
       const data = store.all();
       const payload = {
+        app: APP_ID,
         properties: summarise(data.properties),
         runs: data.runs.slice(-30),
         generatedAt: new Date().toISOString(),
@@ -81,35 +102,39 @@ function serve(opts = {}) {
   return new Promise((resolve, reject) => {
     // A busy port must not surface as an unhandled 'error' event and a stack
     // trace — that reads as a crash when the usual cause is simply that the
-    // dashboard is already open in another window.
+    // dashboard is already open, or that another local app owns the port.
     server.on('error', async err => {
       if (err.code !== 'EADDRINUSE') {
         reject(err);
         return;
       }
 
-      const mine = await isOwnDashboard(port);
-
-      if (mine) {
+      if (await isOwnDashboard(port)) {
         console.log(`\n  Already running  ->  http://localhost:${port}`);
         console.log('  Using the instance that is already up.\n');
-        resolve(null);
+        resolve({ server: null, port, url: `http://localhost:${port}`, alreadyRunning: true });
         return;
       }
 
-      console.log(`\n  Port ${port} is already in use by something else.`);
-      console.log('  Either stop that program, or choose another port:\n');
-      console.log(`      set PORT=4801 && node cli.js serve`);
-      console.log(`      mydei.bat serve            (uses PORT if set)\n`);
+      // Somebody else's app. Move along rather than refusing to start —
+      // several local projects share this machine and 4800 is a popular pick.
+      if (attemptsLeft > 0) {
+        console.log(`  port ${port} is taken by another program, trying ${port + 1}...`);
+        resolve(await serve({ ...opts, port: port + 1, attempts: attemptsLeft - 1 }));
+        return;
+      }
+
+      console.log(`\n  Could not find a free port near ${port}.`);
+      console.log('  Choose one explicitly:  set PORT=4900 && mydei.bat serve\n');
       process.exitCode = 1;
-      resolve(null);
+      resolve({ server: null, port, url: null });
     });
 
     // 127.0.0.1, not 0.0.0.0 — this is personal billing data.
     server.listen(port, '127.0.0.1', () => {
       console.log(`\n  myDEH dashboard  ->  http://localhost:${port}`);
       console.log('  Ctrl+C to stop\n');
-      resolve(server);
+      resolve({ server, port, url: `http://localhost:${port}` });
     });
   });
 }
@@ -181,7 +206,9 @@ function isOwnDashboard(port) {
         res.on('data', c => { body += c; });
         res.on('end', () => {
           try {
-            resolve(Array.isArray(JSON.parse(body).properties));
+            // Match on our own marker, not the payload's shape: another local
+            // app answering /api/data must never be mistaken for this one.
+            resolve(JSON.parse(body).app === APP_ID);
           } catch (e) {
             resolve(false);
           }
@@ -194,4 +221,4 @@ function isOwnDashboard(port) {
   });
 }
 
-module.exports = { serve };
+module.exports = { serve, DEFAULT_PORT, APP_ID };

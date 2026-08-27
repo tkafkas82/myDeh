@@ -18,9 +18,9 @@ setlocal EnableDelayedExpansion
 REM Work from the script's own folder, whatever the caller's directory is.
 cd /d "%~dp0"
 
-REM Respect an already-set PORT so a busy 4800 can be worked around with
-REM     set PORT=4801 && mydei.bat serve
-if "%PORT%"=="" set PORT=4800
+REM PORT is passed through if you set it. Otherwise the app picks its own
+REM default and walks upwards if that port is busy, so nothing is hardcoded
+REM here — it prints the URL it actually secured and opens that.
 
 REM --- Node present? -------------------------------------------------------
 where node >nul 2>&1
@@ -174,10 +174,10 @@ goto :menu
 
 :serve
 echo.
-echo   Dashboard:  http://localhost:%PORT%
-echo   Press Ctrl+C in this window to stop it.
+echo   Starting the dashboard. Press Ctrl+C in this window to stop it.
 echo.
-REM cli.js opens the browser itself once the port is actually bound.
+REM cli.js prints the URL it secured and opens the browser itself, so no URL
+REM is echoed here — the port may differ if another app holds the default.
 node cli.js serve
 echo.
 echo   Server stopped.

@@ -30,17 +30,20 @@ Or drive it with npm:
 npm install          # one small package (playwright-core), no browser download
 npm run login        # sign in yourself, once, in a real browser window
 npm run fetch        # scrape properties + bills, archive PDFs
-npm run serve        # dashboard at http://localhost:4800
+npm run serve        # dashboard (port 4820 by default)
 npm run export       # CSV for Excel
 node cli.js status   # quick summary in the terminal
 ```
 
-If port 4800 is busy, the dashboard says so rather than crashing — and if the
-thing on the port is *this* dashboard already running, it just points you at it.
-To use another port:
+**Ports.** The dashboard defaults to **4820** and walks upwards if that is taken,
+printing and opening whichever port it actually secured. It recognises its own
+instance (via an `app` marker in `/api/data`) so a second start just points at
+the one already running, and it never opens a port it does not own — 4800 was
+the old default and another local project already had it, which sent the browser
+to that app instead. Force a port with:
 
 ```cmd
-set PORT=4801 && mydei.bat serve
+set PORT=4900 && mydei.bat serve
 ```
 
 | Command | What it does |

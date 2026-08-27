@@ -51,7 +51,18 @@ const SNAP = path.join(__dirname, '..', 'data', 'snapshots');
   for (const file of files) {
     const page = await context.newPage();
     try {
-      await page.goto('file:///' + path.join(SNAP, file).replace(/\\/g, '/'), { waitUntil: 'domcontentloaded' });
+      // Strip the page's own scripts before loading it.
+      //
+      // The snapshot contains the *rendered* table, but reloading it boots the
+      // site's Vue app again, which re-renders and can wipe that table before
+      // it is read — the test failed roughly one run in three. Nothing here
+      // needs the page's JavaScript; page.evaluate is injected separately and
+      // still works.
+      const html = fs
+        .readFileSync(path.join(SNAP, file), 'utf8')
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+
+      await page.setContent(html, { waitUntil: 'domcontentloaded' });
 
       const tables = await tablesOn(page);
       const ledger = tables.find(t => t.headers.some(h => /Είδος κίνησης/i.test(h)));
