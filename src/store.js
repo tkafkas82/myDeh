@@ -106,13 +106,45 @@ function merge(scraped, now = new Date().toISOString()) {
   return { added, updated, properties: Object.keys(history.properties).length };
 }
 
+const NAMES = path.join(DATA, 'names.json');
+
+/**
+ * Your own labels for the properties, keyed by contract account.
+ *
+ * The portal's account pages carry no address in any form this could read
+ * reliably, so properties would otherwise show as bare 12-digit numbers.
+ * Rather than guess at scraped text, you name them — and "Κολωνάκι" is more
+ * use than a street address anyway. Survives re-fetching, since nothing here
+ * is written by the scraper.
+ *
+ * data/names.json:  { "300015431312": "Σέριφος — Λιβάδι" }
+ */
+function readNames() {
+  return readJson(NAMES, {});
+}
+
+/** Set (or clear, with an empty label) a friendly name. */
+function setName(account, label) {
+  const names = readNames();
+
+  if (label) {
+    names[String(account)] = String(label);
+  } else {
+    delete names[String(account)];
+  }
+
+  writeJson(NAMES, names);
+  return names;
+}
+
 /** Everything known, shaped for the dashboard and CSV. */
 function all() {
   const history = readJson(HISTORY, { properties: {}, runs: [] });
+  const names = readNames();
 
   const properties = Object.entries(history.properties).map(([key, p]) => ({
     key,
-    name: p.name,
+    name: names[key] || names[p.contractAccount] || p.name,
     supply: p.supply,
     contractAccount: p.contractAccount,
     address: p.address,
@@ -134,4 +166,16 @@ function readCurrent() {
   return readJson(CURRENT, null);
 }
 
-module.exports = { merge, all, saveCurrent, readCurrent, billKey, propertyKey, CURRENT, HISTORY };
+module.exports = {
+  merge,
+  all,
+  saveCurrent,
+  readCurrent,
+  readNames,
+  setName,
+  billKey,
+  propertyKey,
+  CURRENT,
+  HISTORY,
+  NAMES,
+};

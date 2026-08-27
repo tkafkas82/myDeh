@@ -73,6 +73,7 @@ echo     4.  Sign in again    (if the session expired)
 echo     5.  Export CSV       (for Excel)
 echo     6.  Status
 echo     7.  Discover         (map the portal, for troubleshooting)
+echo     8.  Name a property  (so cards show a place, not a number)
 echo.
 echo     0.  Exit
 echo.
@@ -87,6 +88,7 @@ if "%choice%"=="4" goto :login
 if "%choice%"=="5" goto :export
 if "%choice%"=="6" goto :status
 if "%choice%"=="7" goto :discover
+if "%choice%"=="8" goto :naming
 if "%choice%"=="0" exit /b 0
 goto :menu
 
@@ -140,6 +142,22 @@ goto :menu
 :status
 echo.
 node cli.js status
+echo.
+pause
+goto :menu
+
+:naming
+echo.
+echo   The portal exposes no address, so properties show as account numbers.
+echo   Give them names you recognise instead.
+echo.
+node cli.js name
+set "acct="
+set /p "acct=  Account number (blank to go back): "
+if "%acct%"=="" goto :menu
+set "label="
+set /p "label=  Name for it: "
+node cli.js name %acct% "%label%"
 echo.
 pause
 goto :menu

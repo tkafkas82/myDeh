@@ -6,6 +6,7 @@
  *   node cli.js login      sign in once, in a real browser window
  *   node cli.js fetch      scrape properties + bills, archive PDFs
  *   node cli.js discover   map the portal's structure (for calibration)
+ *   node cli.js name      label a property: name <account> "<label>"
  *   node cli.js export     write CSV files
  *   node cli.js serve      local dashboard
  *   node cli.js status     what is stored right now
@@ -113,7 +114,7 @@ async function main() {
 
       const data = store.all();
       if (!data.properties.length) {
-        console.log('\nNothing stored yet. Run:  npm run fetch\n');
+        console.log('\nNothing stored yet — choose START or Fetch in mydei.bat.\n');
         break;
       }
 
@@ -137,6 +138,29 @@ async function main() {
       break;
     }
 
+    // node cli.js name 300015431312 "Σέριφος — Λιβάδι"
+    case 'name': {
+      const store = require('./src/store');
+      const account = process.argv[3];
+      const label = process.argv.slice(4).join(' ');
+
+      if (!account) {
+        const names = store.readNames();
+        const data = store.all();
+        console.log('\n  Current names (edit with: node cli.js name <account> "<label>")\n');
+        for (const p of data.properties) {
+          const own = names[p.key] || names[p.contractAccount];
+          console.log(`  ${String(p.key).padEnd(16)} ${own ? own : '(unnamed)'}`);
+        }
+        console.log('');
+        break;
+      }
+
+      store.setName(account, label);
+      console.log(label ? `\n  ${account} -> ${label}\n` : `\n  ${account} name cleared\n`);
+      break;
+    }
+
     case 'status': {
       const store = require('./src/store');
       const { summarise } = require('./src/parse');
@@ -144,7 +168,7 @@ async function main() {
 
       const data = store.all();
       if (!data.properties.length) {
-        console.log('\nNothing stored yet. Run:  npm run login  then  npm run fetch\n');
+        console.log('\nNothing stored yet — choose START in mydei.bat.\n');
         break;
       }
 

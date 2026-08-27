@@ -342,13 +342,20 @@ async function run(opts = {}) {
   console.log(`  new bills        : ${merged.added}`);
   console.log(`  updated bills    : ${merged.updated}`);
 
-  if (!allBills.length) {
-    console.log('\n  No bills were recognised. Run:  node cli.js discover');
+  // Counted from `result`, which both branches above produce — the previous
+  // `allBills` only existed in one of them, so this threw after a successful
+  // per-property run.
+  const rowCount = result.reduce((n, p) => n + (p.bills ? p.bills.length : 0), 0);
+
+  if (!rowCount) {
+    console.log('\n  No bills were recognised. Choose "Discover" in mydei.bat,');
     console.log('  then share data/discovery.json so the parsers can be');
     console.log('  calibrated to the real page structure.');
   } else {
-    console.log('\n  Next:  npm run serve      (dashboard)');
-    console.log('         npm run export     (CSV)');
+    const bills = result.reduce((n, p) => n + p.bills.filter(b => b.kind === 'bill').length, 0);
+    const payments = result.reduce((n, p) => n + p.bills.filter(b => b.kind === 'payment').length, 0);
+    console.log(`  ledger rows      : ${rowCount} (${bills} bills, ${payments} payments)`);
+    console.log('\n  Open the dashboard from mydei.bat, or export to CSV.');
   }
   console.log('');
 

@@ -124,24 +124,62 @@ place.
 
 ---
 
-## Status: parsers need one calibration pass
+## The portal's actual structure
 
-The property list and bill tables are behind the login, so their exact markup
-could not be known while building this. The extraction is written to be
-structure-agnostic and is fully tested against realistic Greek tables — but it
-has **not yet been run against the real signed-in pages**.
+Calibrated against the live site, not guessed. Each property has its own page:
 
-If `npm run fetch` reports no bills:
-
-```bash
-node cli.js discover
+```
+/el/account/<contract account>/
 ```
 
-That crawls the signed-in area, scores every page and table for how bill-like it
-is, and writes `data/discovery.json` plus HTML snapshots. **`discovery.json`
-holds structure — page titles, table headers, class names — not your bill
-amounts**, so it is the safe file to share for calibration. The snapshots
-under `data/snapshots/` do contain real data; `data/` is gitignored entirely.
+carrying one table:
+
+```
+Ημερομηνία | Είδος κίνησης | Περίοδος κατανάλωσης | Εξόφληση έως
+           | Τρέχον ποσό | Ληξιπρ. ποσό | Συνολικό ποσό
+```
+
+Three facts about it shape everything:
+
+- **It is a transaction ledger, not a bill list.** `Είδος κίνησης` distinguishes
+  a bill from a payment, so rows are classified `bill` / `payment` / `other`
+  instead of all being counted as bills.
+- **There is no status column.** Paid/unpaid comes from `Ληξιπρ. ποσό` —
+  anything sitting in "overdue" is overdue by definition.
+- **There is no consumption column.** See the gap below.
+
+`test/snapshot.test.js` re-runs the parser over saved account pages and asserts
+all seven columns still map, reporting only counts and fill rates — never a
+date, amount or address, so its output is safe to paste anywhere. Run it after
+any portal change:
+
+```bash
+node cli.js discover        # refresh the snapshots
+node test/snapshot.test.js  # 7/7 columns must still map
+```
+
+## Known gap: no kWh
+
+The ledger carries no consumption figure, so **the kWh fields stay empty** and
+the dashboard's consumption sparkline does not draw. Consumption appears to live
+in an *Ενεργειακή κατανάλωση* widget on the account page — likely a chart rather
+than a table — which would need a separate pass to reach. The fields are left
+null rather than filled with anything invented.
+
+## Naming your properties
+
+The account pages expose no address in any form this could read reliably, so
+properties would show as bare 12-digit numbers. Name them yourself instead —
+menu option 8, or:
+
+```bash
+node cli.js name                              # list them
+node cli.js name 300015431312 "Σέριφος"       # set one
+node cli.js name 300015431312                 # clear it
+```
+
+Stored in `data/names.json`, which the scraper never writes, so names survive
+every re-fetch.
 
 ---
 
