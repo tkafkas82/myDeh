@@ -10,6 +10,22 @@ Your own account, your own data, on your own machine. Nothing leaves it.
 
 ## Running it
 
+**Double-click `mydei.bat`.** It installs dependencies on first run and gives a
+menu: dashboard, fetch, sign in, export, status, discover. Runs directly on
+Windows — no WSL or Docker involved.
+
+It also takes a command directly:
+
+```cmd
+mydei.bat login
+mydei.bat fetch
+mydei.bat serve
+mydei.bat export
+mydei.bat status
+```
+
+Or drive it with npm:
+
 ```bash
 npm install          # one small package (playwright-core), no browser download
 npm run login        # sign in yourself, once, in a real browser window
@@ -17,6 +33,14 @@ npm run fetch        # scrape properties + bills, archive PDFs
 npm run serve        # dashboard at http://localhost:4800
 npm run export       # CSV for Excel
 node cli.js status   # quick summary in the terminal
+```
+
+If port 4800 is busy, the dashboard says so rather than crashing — and if the
+thing on the port is *this* dashboard already running, it just points you at it.
+To use another port:
+
+```cmd
+set PORT=4801 && mydei.bat serve
 ```
 
 | Command | What it does |

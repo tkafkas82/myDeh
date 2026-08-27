@@ -66,13 +66,70 @@ function serve(opts = {}) {
     res.end('Not found');
   });
 
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
+    // A busy port must not surface as an unhandled 'error' event and a stack
+    // trace — that reads as a crash when the usual cause is simply that the
+    // dashboard is already open in another window.
+    server.on('error', async err => {
+      if (err.code !== 'EADDRINUSE') {
+        reject(err);
+        return;
+      }
+
+      const mine = await isOwnDashboard(port);
+
+      if (mine) {
+        console.log(`\n  Already running  ->  http://localhost:${port}`);
+        console.log('  Using the instance that is already up.\n');
+        resolve(null);
+        return;
+      }
+
+      console.log(`\n  Port ${port} is already in use by something else.`);
+      console.log('  Either stop that program, or choose another port:\n');
+      console.log(`      set PORT=4801 && node cli.js serve`);
+      console.log(`      mydei.bat serve            (uses PORT if set)\n`);
+      process.exitCode = 1;
+      resolve(null);
+    });
+
     // 127.0.0.1, not 0.0.0.0 — this is personal billing data.
     server.listen(port, '127.0.0.1', () => {
       console.log(`\n  myDEH dashboard  ->  http://localhost:${port}`);
       console.log('  Ctrl+C to stop\n');
       resolve(server);
     });
+  });
+}
+
+/**
+ * Is the thing already listening on this port our own dashboard?
+ *
+ * Distinguishes "you already have it open" from "something unrelated has the
+ * port", which need different advice.
+ */
+function isOwnDashboard(port) {
+  return new Promise(resolve => {
+    const req = http.get(
+      { host: '127.0.0.1', port, path: '/api/data', timeout: 1500 },
+      res => {
+        // Read it all: truncating would break JSON.parse once there are
+        // enough bills, and misreport our own dashboard as a foreign process.
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', c => { body += c; });
+        res.on('end', () => {
+          try {
+            resolve(Array.isArray(JSON.parse(body).properties));
+          } catch (e) {
+            resolve(false);
+          }
+        });
+      }
+    );
+
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.on('error', () => resolve(false));
   });
 }
 
