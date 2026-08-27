@@ -18,6 +18,66 @@ const BASE = 'https://mydei.dei.gr';
 const LOGIN_URL = `${BASE}/el/login`;
 
 /**
+ * /el/login is not a credentials form — it is a category chooser. The username
+ * and password fields only exist after one of these is clicked, which is why
+ * the page reports zero inputs on arrival.
+ */
+const CATEGORIES = {
+  individual: 'Φυσικά & Νομικά Πρόσωπα',  // households and companies
+  municipal: 'Δήμοι & Πολλαπλοί',          // municipalities / multiple supplies
+  communal: 'Κοινόχρηστα',                 // shared building supplies
+};
+
+/**
+ * Deal with the OneTrust cookie banner.
+ *
+ * Not cosmetic: it lays a fixed dark filter over the page
+ * (div.onetrust-pc-dark-filter) that swallows clicks on the category cards.
+ *
+ * Rejects non-essential cookies where that option exists, since opting someone
+ * into tracking on their behalf is not this tool's call; falls back to accept
+ * only because the banner must go for the page to be usable.
+ */
+async function dismissCookieBanner(page) {
+  for (const selector of [
+    '#onetrust-reject-all-handler',
+    '#onetrust-accept-btn-handler',
+  ]) {
+    const button = page.locator(selector).first();
+    if (await button.isVisible().catch(() => false)) {
+      await button.click({ timeout: 5000 }).catch(() => {});
+      // OneTrust re-renders (and can reload) the page after a consent choice,
+      // which throws away the client-rendered login box. Wait for the document
+      // to settle again, or the next click has nothing to land on.
+      await page.waitForLoadState('load').catch(() => {});
+      await page.waitForTimeout(1200);
+      return selector;
+    }
+  }
+  return null;
+}
+
+/**
+ * Is the category chooser on screen?
+ *
+ * Clicking a card for you was tried and abandoned: driven from Playwright the
+ * click registers but no credentials form ever appears, on any consent path.
+ * Rather than ship a step that silently does nothing — or worse, picks the
+ * wrong account type — the chooser is simply detected so the instructions can
+ * name what you are looking at. It is one click, and you are already there.
+ *
+ * @param {import('playwright-core').Page} page
+ */
+async function hasCategoryChooser(page) {
+  return page
+    .locator('button.b-login-box__card')
+    .first()
+    .waitFor({ state: 'visible', timeout: 20000 })
+    .then(() => true)
+    .catch(() => false);
+}
+
+/**
  * Is this page past the login screen?
  *
  * Deliberately conservative: anything unrecognised counts as *not* signed in.
@@ -86,7 +146,7 @@ async function login(opts = {}) {
   console.log(`\nChromium: ${executablePath}`);
   console.log(`Opening  ${LOGIN_URL}\n`);
 
-  await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await page.goto(LOGIN_URL, { waitUntil: 'load' }).catch(() => {});
 
   if (await isSignedIn(page).catch(() => false)) {
     console.log('Already signed in — the saved session is still valid.\n');
@@ -94,13 +154,33 @@ async function login(opts = {}) {
     return true;
   }
 
-  console.log('─'.repeat(64));
+  // Clearing the consent banner is worth doing: its overlay sits over the page
+  // and gets in the way of the very first click.
+  const consent = await dismissCookieBanner(page);
+  if (consent) console.log('Cookie banner dismissed (non-essential cookies declined).');
+
+  const chooser = await hasCategoryChooser(page);
+
+  console.log('');
+  console.log('─'.repeat(66));
   console.log(' Sign in in the browser window that just opened.');
-  console.log(' Handle any OTP or verification there as you normally would.');
+  console.log('');
+
+  if (chooser) {
+    console.log(' The page asks which kind of customer you are FIRST — the');
+    console.log(' username and password fields only appear after you pick one:');
+    console.log('');
+    console.log(`   • ${CATEGORIES.individual}   <- homes`);
+    console.log(`   • ${CATEGORIES.municipal}`);
+    console.log(`   • ${CATEGORIES.communal}`);
+    console.log('');
+  }
+
+  console.log(' Then sign in, handling any OTP as you normally would.');
   console.log('');
   console.log(' Nothing is typed or stored by this tool. It only waits.');
   console.log(' It should notice by itself; press Enter here if it does not.');
-  console.log('─'.repeat(64));
+  console.log('─'.repeat(66));
   console.log('');
 
   const outcome = await Promise.race([
@@ -170,6 +250,9 @@ module.exports = {
   ensureSignedIn,
   hasValidSession,
   isSignedIn,
+  dismissCookieBanner,
+  hasCategoryChooser,
+  CATEGORIES,
   BASE,
   LOGIN_URL,
 };

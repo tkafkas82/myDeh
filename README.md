@@ -60,6 +60,13 @@ does not try to get around either, and it handles no credentials at all:
 
 - `npm run login` opens a real browser window. **You** sign in, including any
   OTP or verification.
+- **`/el/login` is a category chooser, not a login form.** You pick
+  *Φυσικά & Νομικά Πρόσωπα* (homes), *Δήμοι & Πολλαπλοί* or *Κοινόχρηστα*
+  first, and only then do the username and password fields appear. The tool
+  clears the cookie banner (declining non-essential cookies) and tells you to
+  pick a card. It does **not** click one for you: driven from Playwright the
+  click registers but no form ever appears, and guessing your account type
+  would be worse than asking. It is one click and you are already there.
 - The session lands in a normal browser profile at `data/profile`, so later runs
   reuse it with no prompt.
 - Your password is never typed by this tool, never written to a file, never in
