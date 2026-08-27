@@ -90,7 +90,18 @@ async function main() {
     }
 
     case 'discover': {
+      const { ensureSignedIn } = require('./src/login');
       const { discover } = require('./src/discover');
+
+      // Same as fetch: sign in if the session has lapsed, rather than bailing
+      // out and telling you to go and run something else.
+      console.log('');
+      if (!(await ensureSignedIn())) {
+        console.log('\n  Sign-in did not complete, so there is nothing to map.\n');
+        process.exitCode = 1;
+        break;
+      }
+
       await discover({ headless: !has('show'), max: 30 });
       break;
     }

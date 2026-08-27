@@ -111,7 +111,9 @@ async function discover(opts = {}) {
   await page.goto(`${BASE}/el/`, { waitUntil: 'domcontentloaded' }).catch(() => {});
 
   if (!(await isSignedIn(page).catch(() => false))) {
-    console.log('\nNot signed in. Run "npm run login" first.\n');
+    // Reached only if the session lapsed between the check and here; callers
+    // sign in first. Worded for whoever is reading it, terminal or dashboard.
+    console.log('\nThe myDEH session is not active. Use "Σύνδεση" / Sign in.\n');
     await context.close();
     return null;
   }

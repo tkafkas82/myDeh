@@ -18,6 +18,12 @@ const BASE = 'https://mydei.dei.gr';
 const LOGIN_URL = `${BASE}/el/login`;
 
 /**
+ * Umbraco's authenticated-member cookie. Present only after a real sign-in,
+ * unlike the session and Imperva cookies handed to anonymous visitors.
+ */
+const MEMBER_COOKIE = 'UMB_UCONTEXT_MEMBERS';
+
+/**
  * /el/login is not a credentials form — it is a category chooser. The username
  * and password fields only exist after one of these is clicked, which is why
  * the page reports zero inputs on arrival.
@@ -87,30 +93,31 @@ async function hasCategoryChooser(page) {
  * @param {import('playwright-core').Page} page
  */
 async function isSignedIn(page) {
-  // Two things make the naive checks wrong here, both learned the hard way:
-  //
-  //  1. The login form is rendered by JavaScript, so at domcontentloaded the
-  //     page has no inputs at all and "no password field" looks like success.
-  //     Hence waiting for one of the two signals to actually appear.
-  //  2. The logout link is in the markup even when anonymous — the template
-  //     ships both states and hides one. So visibility decides, not presence.
   await page.waitForLoadState('load').catch(() => {});
 
+  // A visible password field means the login form is on screen. Decisive, and
+  // checked first so a stale cookie cannot override what is plainly a login
+  // page. Note the form is client-rendered, so it needs waiting for.
   const password = page.locator('input[type="password"]').first();
-  const logout = page.locator('a[href*="Logout" i], a[href*="logout" i]').first();
+  const visiblePassword = await password
+    .waitFor({ state: 'visible', timeout: 6000 })
+    .then(() => true)
+    .catch(() => false);
+  if (visiblePassword) return false;
 
-  // Whichever becomes visible first settles it.
-  await Promise.any([
-    password.waitFor({ state: 'visible', timeout: 15000 }),
-    logout.waitFor({ state: 'visible', timeout: 15000 }),
-  ]).catch(() => {});
-
-  if (await password.isVisible().catch(() => false)) return false;
-  if (await logout.isVisible().catch(() => false)) return true;
-
-  // Neither appeared: unknown, so treat as not signed in. A false negative
-  // asks for a login; a false positive makes the tool report zero bills.
-  return false;
+  // Otherwise trust the cookie jar, not the DOM.
+  //
+  // Reading the page was tried twice and failed both ways: matching navigation
+  // words ("Λογαριασμοί", "Παροχές") gave false positives because they exist on
+  // the public site, and requiring a *visible* logout link gave false negatives
+  // because it lives in a collapsed user menu. Meanwhile the login itself is
+  // unambiguous in the cookies.
+  //
+  // UMB_UCONTEXT_MEMBERS is Umbraco's authenticated-member context: it exists
+  // only once a member has signed in, unlike the session and Imperva cookies
+  // which are handed to anonymous visitors too.
+  const cookies = await page.context().cookies().catch(() => []);
+  return cookies.some(c => c.name === MEMBER_COOKIE && c.value);
 }
 
 /** Wait for either auto-detection or the user pressing Enter. */
